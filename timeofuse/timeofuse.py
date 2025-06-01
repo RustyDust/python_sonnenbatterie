@@ -87,22 +87,21 @@ class TimeofUse:
 
     def is_overlapping(self, other):
         # is our start time within the others time window ?
-        if (self.start_time>= other.start_time) and (self.start_time<= other.stop_time):
+        if (self.start_time >= other.start_time) and (self.start_time <= other.stop_time):
             return True
-        
+
         # is our end time within the others time window ?
-        if (self.stop_time>= other.start_time) and (self.stop_time<= other.stop_time):
+        if (self.stop_time > other.start_time) and (self.stop_time <= other.stop_time):
             return True
-        
 
         # is it's start time within the out time window ?
-        if (other.start_time>= self.start_time) and (other.start_time<= self.stop_time):
+        if (other.start_time >= self.start_time) and (other.start_time < self.stop_time):
             return True
-        
+
         # is it's end time within the out time window ?
-        if (other.stop_time>= self.start_time) and (other.stop_time<= self.stop_time):
+        if (other.stop_time >= self.start_time) and (other.stop_time <= self.stop_time):
             return True
-        
+
         # no overlap
         return False
 
