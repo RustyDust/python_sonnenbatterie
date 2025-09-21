@@ -36,8 +36,17 @@ class sonnenbatterie:
         password_sha512 = hashlib.sha512(self.password.encode('utf-8')).hexdigest()
         req_challenge=requests.get(self.baseurl+'challenge', timeout=self._batteryLoginTimeout)
         req_challenge.raise_for_status()
+
+        salt=requests.get(self.baseurl+'salt/'+self.username, timeout=self._batteryLoginTimeout, allow_redirects=False)##returns a solt after battery got updated to a certatin version (>1.18??)
+        saltResponseCode=salt.status_code
+
         challenge=req_challenge.json()
-        response=hashlib.pbkdf2_hmac('sha512',password_sha512.encode('utf-8'),challenge.encode('utf-8'),7500,64).hex()
+        if saltResponseCode!=200: #use old variant where no salt is availlable
+            response=hashlib.pbkdf2_hmac('sha512',password_sha512.encode('utf-8'),challenge.encode('utf-8'),7500,64).hex()
+        else:
+            salt=salt.json()
+            response=hashlib.pbkdf2_hmac('sha512',password_sha512.encode('utf-8'),salt.encode('utf-8'),7500,64).hex()
+        
         
         getsession=requests.post(self.baseurl+'session',{"user":self.username,"challenge":challenge,"response":response}, timeout=self._batteryLoginTimeout)
         getsession.raise_for_status()
