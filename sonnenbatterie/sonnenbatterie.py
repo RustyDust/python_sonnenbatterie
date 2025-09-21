@@ -1,5 +1,6 @@
 import json
 import sys
+import base64, binascii, hashlib, hmac, string
 
 from sonnenbatterie2.sonnenbatterie2 import AsyncSonnenBatterieV2
 
@@ -40,13 +41,39 @@ class sonnenbatterie:
         salt=requests.get(self.baseurl+'salt/'+self.username, timeout=self._batteryLoginTimeout, allow_redirects=False)##returns a solt after battery got updated to a certatin version (>1.18??)
         saltResponseCode=salt.status_code
 
-        challenge=req_challenge.json()
-        if saltResponseCode!=200: #use old variant where no salt is availlable
-            response=hashlib.pbkdf2_hmac('sha512',password_sha512.encode('utf-8'),challenge.encode('utf-8'),7500,64).hex()
-        else:
-            salt=salt.json()
-            response=hashlib.pbkdf2_hmac('sha512',password_sha512.encode('utf-8'),salt.encode('utf-8'),7500,64).hex()
         
+
+
+
+
+        challenge=req_challenge.json()
+        if saltResponseCode!=200: #use old variant where no salt is availlable 
+            #Old path (no salt): PBKDF2 over sha512(password) + challenge → hex
+            response=hashlib.pbkdf2_hmac('sha512',password_sha512.encode('utf-8'),challenge.encode('utf-8'),7500,64).hex()
+        else:#New path (with salt): PBKDF2 over password + salt → HMAC-SHA256(challenge) → hex.
+            salt_payload=salt.json()
+            salt_str = salt_payload["salt"]
+            try:
+                if len(salt_str) % 2 == 0 and all(c in string.hexdigits for c in salt_str):
+                    salt_bytes = bytes.fromhex(salt_str)
+                else:
+                    raise ValueError
+            except Exception:
+                try:
+                    salt_bytes = base64.b64decode(salt_str, validate=True)
+                except Exception:
+                    salt_bytes = salt_str.encode("utf-8")
+
+            
+            dk = hashlib.pbkdf2_hmac(
+                "sha512",
+                self.password.encode("utf-8"),  # raw password (not pre-hashed)
+                salt_bytes,
+                7500,
+                dklen=64
+            )
+            response = hmac.new(dk, challenge.encode("utf-8"), hashlib.sha256).hexdigest()
+
         
         getsession=requests.post(self.baseurl+'session',{"user":self.username,"challenge":challenge,"response":response}, timeout=self._batteryLoginTimeout)
         getsession.raise_for_status()
