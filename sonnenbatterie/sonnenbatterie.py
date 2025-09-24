@@ -296,7 +296,7 @@ class AsyncSonnenBatterie:
             #Old path (no salt): PBKDF2 over sha512(password) + challenge → hex
             response=hashlib.pbkdf2_hmac('sha512',pw_sha512.encode('utf-8'),challenge.encode('utf-8'),7500,64).hex()
         else:#New path (with salt): PBKDF2 over password + salt → HMAC-SHA256(challenge) → hex.
-            salt_payload=salt.json()
+            salt_payload = await salt.json()
             salt_str = salt_payload["salt"]
             try:
                 if len(salt_str) % 2 == 0 and all(c in string.hexdigits for c in salt_str):
