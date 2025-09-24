@@ -295,44 +295,69 @@ class AsyncSonnenBatterie:
         if saltResponseCode!=200: #use old variant where no salt is availlable 
             #Old path (no salt): PBKDF2 over sha512(password) + challenge → hex
             response=hashlib.pbkdf2_hmac('sha512',pw_sha512.encode('utf-8'),challenge.encode('utf-8'),7500,64).hex()
-        else:#New path (with salt): PBKDF2 over password + salt → HMAC-SHA256(challenge) → hex.
-            salt_payload = await salt.json()
-            salt_str = salt_payload["salt"]
-            try:
-                if len(salt_str) % 2 == 0 and all(c in string.hexdigits for c in salt_str):
-                    salt_bytes = bytes.fromhex(salt_str)
-                else:
-                    raise ValueError
-            except Exception:
-                try:
-                    salt_bytes = base64.b64decode(salt_str, validate=True)
-                except Exception:
-                    salt_bytes = salt_str.encode("utf-8")
-
-            
-            dk = hashlib.pbkdf2_hmac(
-                "sha512",
-                self.password.encode("utf-8"),  # raw password (not pre-hashed)
-                salt_bytes,
-                7500,
-                dklen=64
+            session = await self._session.post(
+                url = self.baseurl+'session',
+                data = {"user":self.username,"challenge":challenge,"response":response},
+                timeout=self._timeout,
             )
-            response = hmac.new(dk, challenge.encode("utf-8"), hashlib.sha256).hexdigest()
+            session.raise_for_status()
+            token = await session.json()
+            self.token = token['authentication_token']
+        else:#New path (with salt): PBKDF2 over password + salt → HMAC-SHA256(challenge) → hex.
+          await create_session_token_new()
 
 
 
-        session = await self._session.post(
-            url = self.baseurl+'session',
-            data = {"user":self.username,"challenge":challenge,"response":response},
-            timeout=self._timeout,
-        )
-        session.raise_for_status()
-        token = await session.json()
-        self.token = token['authentication_token']
 
         # Inisitalite async API v2
         if self.sb2 is None:
             self.sb2 = AsyncSonnenBatterieV2(ip_address=self.ipaddress, api_token=self.token)
+
+
+    async def create_session_token_new(self):
+        # Step 1: challenge
+        async with self._session.get(f"{self.baseurl}challenge") as r:
+            r.raise_for_status()
+            try:
+                challenge = await r.json()
+                if isinstance(challenge, dict):
+                    challenge = challenge.get("challenge") or next(iter(challenge.values()))
+            except Exception:
+                challenge = (await r.text()).strip()
+
+        # Step 2: salt
+        async with self._session.get(f"{self.baseurl}salt/{self.username}") as r:
+            r.raise_for_status()
+            salt = (await r.json())["salt"]
+
+        # Step 3: derive key
+        pw_sha512_hex = hashlib.sha512(self.password.encode("utf-8")).hexdigest()
+        pw_bytes = pw_sha512_hex.encode("utf-8")
+        dk = hashlib.pbkdf2_hmac("sha512", pw_bytes, salt.encode("utf-8"), 7500, dklen=64)
+        derived_hex = dk.hex()
+
+        # Step 4: loop: POST /session, maybe retry with new_challenge
+        for _ in range(2):
+            key = derived_hex.encode("utf-8")
+            response = hmac.new(key, challenge.encode("utf-8"), hashlib.sha256).hexdigest()
+            payload = {"user": self.username, "challenge": challenge, "response": response}
+
+            async with self._session.post(f"{self.baseurl}session", json=payload) as r:
+                r.raise_for_status()
+                data = await r.json()
+
+            if "new_challenge" in data and data["new_challenge"]:
+                challenge = data["new_challenge"]
+                continue
+
+            if "authentication_token" in data and data["authentication_token"]:
+                 self.token = data["authentication_token"]
+
+            raise RuntimeError(f"Unexpected /session response: {json.dumps(data)}")
+
+        raise RuntimeError("Failed to obtain authentication_token")
+
+
 
 
     """ Base functions """
