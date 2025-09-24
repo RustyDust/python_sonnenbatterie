@@ -284,15 +284,42 @@ class AsyncSonnenBatterie:
             timeout=self._timeout,
         )
         req_challenge.raise_for_status()
-
         challenge = await req_challenge.json()
-        response = hashlib.pbkdf2_hmac(
-            'sha512',
-            pw_sha512.encode('utf-8'),
-            challenge.encode('utf-8'),
-            7500,
-            64
-        ).hex()
+
+        salt =  await self._session.get(self.baseurl+'salt/'+self.username, timeout=self._timeout, allow_redirects=False)##returns a solt after battery got updated to a certatin version (>1.18??)
+        saltResponseCode = salt.status
+
+
+
+
+        if saltResponseCode!=200: #use old variant where no salt is availlable 
+            #Old path (no salt): PBKDF2 over sha512(password) + challenge → hex
+            response=hashlib.pbkdf2_hmac('sha512',pw_sha512.encode('utf-8'),challenge.encode('utf-8'),7500,64).hex()
+        else:#New path (with salt): PBKDF2 over password + salt → HMAC-SHA256(challenge) → hex.
+            salt_payload=salt.json()
+            salt_str = salt_payload["salt"]
+            try:
+                if len(salt_str) % 2 == 0 and all(c in string.hexdigits for c in salt_str):
+                    salt_bytes = bytes.fromhex(salt_str)
+                else:
+                    raise ValueError
+            except Exception:
+                try:
+                    salt_bytes = base64.b64decode(salt_str, validate=True)
+                except Exception:
+                    salt_bytes = salt_str.encode("utf-8")
+
+            
+            dk = hashlib.pbkdf2_hmac(
+                "sha512",
+                self.password.encode("utf-8"),  # raw password (not pre-hashed)
+                salt_bytes,
+                7500,
+                dklen=64
+            )
+            response = hmac.new(dk, challenge.encode("utf-8"), hashlib.sha256).hexdigest()
+
+
 
         session = await self._session.post(
             url = self.baseurl+'session',
