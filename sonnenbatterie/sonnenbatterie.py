@@ -304,7 +304,7 @@ class AsyncSonnenBatterie:
             token = await session.json()
             self.token = token['authentication_token']
         else:#New path (with salt): PBKDF2 over password + salt → HMAC-SHA256(challenge) → hex.
-          await create_session_token_new()
+          await self.create_session_token_new()
 
 
 
