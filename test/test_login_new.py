@@ -19,6 +19,7 @@ import hashlib
 
 def main():
     challenge="39bdd8a304b84c76"
+    challenge="d43aeb06a6394daa"
     username="User"
     password="sonnenUser3552!"
     salt="04f8996da763b7a969b1028ee3007569eaf3a635486ddab211d512c85b9df8fb_02bbe1e15021947b232050cc88b07772"
