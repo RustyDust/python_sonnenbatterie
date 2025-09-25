@@ -290,8 +290,6 @@ class AsyncSonnenBatterie:
         saltResponseCode = salt.status
 
 
-
-
         if saltResponseCode!=200: #use old variant where no salt is availlable 
             #Old path (no salt): PBKDF2 over sha512(password) + challenge → hex
             response=hashlib.pbkdf2_hmac('sha512',pw_sha512.encode('utf-8'),challenge.encode('utf-8'),7500,64).hex()
@@ -314,6 +312,16 @@ class AsyncSonnenBatterie:
             self.sb2 = AsyncSonnenBatterieV2(ip_address=self.ipaddress, api_token=self.token)
 
 
+
+    def create_response_from_values(self, username, password, challenge, salt):
+        pw_sha512_hex = hashlib.sha512(password.encode("utf-8")).hexdigest()
+        pw_bytes = pw_sha512_hex.encode("utf-8")
+        dk = hashlib.pbkdf2_hmac("sha512", pw_bytes, salt.encode("utf-8"), 7500, dklen=64)
+        derived_hex = dk.hex()
+        key = derived_hex.encode("utf-8")
+        response = hmac.new(key, challenge.encode("utf-8"), hashlib.sha256).hexdigest()
+        return response
+
     async def create_session_token_new(self):
         # Step 1: challenge
         async with self._session.get(f"{self.baseurl}challenge") as r:
@@ -330,19 +338,24 @@ class AsyncSonnenBatterie:
             r.raise_for_status()
             salt = (await r.json())["salt"]
 
-        # Step 3: derive key
-        pw_sha512_hex = hashlib.sha512(self.password.encode("utf-8")).hexdigest()
-        pw_bytes = pw_sha512_hex.encode("utf-8")
-        dk = hashlib.pbkdf2_hmac("sha512", pw_bytes, salt.encode("utf-8"), 7500, dklen=64)
-        derived_hex = dk.hex()
-
+   
         # Step 4: loop: POST /session, maybe retry with new_challenge
         for _ in range(2):
-            key = derived_hex.encode("utf-8")
-            response = hmac.new(key, challenge.encode("utf-8"), hashlib.sha256).hexdigest()
+            response = self.create_response_from_values(self.username,self.password,challenge,salt)
             payload = {"user": self.username, "challenge": challenge, "response": response}
 
             async with self._session.post(f"{self.baseurl}session", json=payload) as r:
+                txt = await r.text()
+                if r.status >= 400:
+                    raise RuntimeError(
+                        f"Login failed with HTTP {r.status}\n"
+                        f"URL: {r.url}\n"
+                        f"Payload: {json.dumps(payload)}\n"
+                        f"challenge: {challenge}\n"
+                        f"salt: {salt}\n"
+                        f"response: {response}\n"
+                        f"Server reply: {txt}"
+                    )
                 r.raise_for_status()
                 data = await r.json()
 
